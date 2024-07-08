@@ -8,7 +8,7 @@ PYTHON_FILE="prusa-connect-camera-upload.py"
 PYTHON_INTERPRETER="/usr/bin/python3"
 
 # Check if the cron job already exists
-crontab -l | grep -q "@reboot cd $SCRIPT_DIR && $PYTHON_INTERPRETER/$PYTHON_FILE"
+crontab -l | grep -q "@reboot cd $SCRIPT_DIR && $PYTHON_INTERPRETER $PYTHON_FILE"
 if [ $? -eq 0 ]; then
     echo "Cron job already exists."
 else

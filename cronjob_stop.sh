@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the Python file that was set to run on boot
-PYTHON_FILE="/path/to/your_script.py"
+PYTHON_FILE="prusa-connect-camera-upload.py"
 
 # Find the process ID (PID) of the running Python script
 PID=$(pgrep -f "$PYTHON_FILE")

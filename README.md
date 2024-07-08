@@ -10,10 +10,11 @@ https://connect.prusa3d.com/docs/cameras/#tag/cameras
 - Run the script `./prusa-connect-camera-upload.py &`
 
 ## How to automatically start it on boot
-Run `./cronjob_install.sh`
+Run `./cronjob_install.sh`  
 
 ## How to stop the script
 Run `./cronjob_stop.sh`
+(Check `crontab -l` or `crontab -e` to do manually)
 
 ## And on Windows?
 Put a shortcut to the .py file in `C:\Users\%userprofile%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`
