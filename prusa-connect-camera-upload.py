@@ -1,8 +1,47 @@
-import requests
+import logging
 import time
-from secrets import * # gitignored for security
+from logging.handlers import RotatingFileHandler
 
-def fetch_snapshot(url):
+import requests
+from secrets import camera_fingerprint, image_source_url, prusa_camera_api_token  # gitignored for security
+
+
+PRUSA_CONNECT_URL = "https://webcam.connect.prusa3d.com/c/snapshot"
+POLL_INTERVAL_SECONDS = 10
+SNAPSHOT_TIMEOUT_SECONDS = 10
+UPLOAD_TIMEOUT_SECONDS = 15
+LOG_FILE = "prusa-connect-camera-upload.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
+LOG_BACKUP_COUNT = 5
+
+
+def setup_logging():
+    """Configure console + rolling file logging for long-running usage."""
+    logger = logging.getLogger("prusa_camera_uploader")
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    logger.handlers.clear()
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    return logger
+
+def fetch_snapshot(session, url, logger):
     """
     Fetches a snapshot from the given URL and returns the image data.
 
@@ -14,22 +53,19 @@ def fetch_snapshot(url):
     - None: If there was an error fetching the snapshot.
     """
     try:
-        # Send a GET request to the URL
-        response = requests.get(url)
-
-        # Check if the request was successful
+        response = session.get(url, timeout=SNAPSHOT_TIMEOUT_SECONDS)
         if response.status_code == 200:
             return response.content
-        else:
-            print(f"Failed to retrieve snapshot. Status code: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"An error occurred: {e}")
+
+        logger.warning("Snapshot fetch failed with status code %s", response.status_code)
+        return None
+    except requests.RequestException as exc:
+        logger.warning("Snapshot fetch failed: %s", exc)
         return None
 
-def upload_image(http_url, fingerprint, token, image):
+def upload_image(session, http_url, fingerprint, token, image):
     """Upload an image over http"""
-    response = requests.put(
+    response = session.put(
         http_url,
         headers={
             "accept": "*/*",
@@ -38,30 +74,52 @@ def upload_image(http_url, fingerprint, token, image):
             "token": token,
         },
         data=image,
-        stream=True,
+        timeout=UPLOAD_TIMEOUT_SECONDS,
     )
     return response
     
 def main():
-    prusa_connect_url = "https://webcam.connect.prusa3d.com/c/snapshot"
+    logger = setup_logging()
+    logger.info("Starting Prusa Connect camera uploader")
+    session = requests.Session()
 
     try:
         while True:
             try:
-                image = fetch_snapshot(image_source_url)
-                if image:
-                    print(len(image))
+                image = fetch_snapshot(session, image_source_url, logger)
+                if not image:
+                    logger.warning("Skipping upload because snapshot retrieval failed")
+                    continue
+
+                response = upload_image(
+                    session,
+                    PRUSA_CONNECT_URL,
+                    camera_fingerprint,
+                    prusa_camera_api_token,
+                    image,
+                )
+                if response.ok:
+                    logger.info(
+                        "Uploaded snapshot (%s bytes), response status=%s",
+                        len(image),
+                        response.status_code,
+                    )
                 else:
-                    print("Failed to fetch the snapshot.")
-                response = upload_image(prusa_connect_url, camera_fingerprint, prusa_camera_api_token, image)
-                print(response)
+                    logger.warning(
+                        "Upload failed with status code %s, body=%s",
+                        response.status_code,
+                        response.text[:300],
+                    )
+            except requests.RequestException as exc:
+                logger.exception("Network error in upload loop: %s", exc)
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                logger.exception("Unexpected error in upload loop: %s", exc)
             finally:
-                None
-            
-            # Wait for 10 seconds before fetching the snapshot again
-            time.sleep(10)
+                time.sleep(POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        print("Program interrupted and stopped.")
+        logger.info("Program interrupted and stopped")
+    finally:
+        session.close()
         
 
 if __name__ == "__main__":
