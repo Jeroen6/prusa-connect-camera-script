@@ -10,6 +10,7 @@ PRUSA_CONNECT_URL = "https://webcam.connect.prusa3d.com/c/snapshot"
 POLL_INTERVAL_SECONDS = 10
 SNAPSHOT_TIMEOUT_SECONDS = 10
 UPLOAD_TIMEOUT_SECONDS = 15
+MAX_SNAPSHOT_SIZE_BYTES = 16 * 1024 * 1024  # API limit: 16 MiB
 LOG_FILE = "prusa-connect-camera-upload.log"
 LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
 LOG_BACKUP_COUNT = 5
@@ -91,6 +92,14 @@ def main():
                     logger.warning("Skipping upload because snapshot retrieval failed")
                     continue
 
+                if len(image) > MAX_SNAPSHOT_SIZE_BYTES:
+                    logger.warning(
+                        "Skipping upload because snapshot is too large: %s bytes (max %s)",
+                        len(image),
+                        MAX_SNAPSHOT_SIZE_BYTES,
+                    )
+                    continue
+
                 response = upload_image(
                     session,
                     PRUSA_CONNECT_URL,
@@ -98,13 +107,18 @@ def main():
                     prusa_camera_api_token,
                     image,
                 )
-                if response.ok:
+                if response.status_code == 204:
                     logger.info(
-                        "Uploaded snapshot (%s bytes), response status=%s",
+                        "Uploaded snapshot (%s bytes), response status=204",
                         len(image),
-                        response.status_code,
                     )
                 else:
+                    if response.status_code in (401, 403, 404):
+                        logger.error(
+                            "Upload auth/resource error: status=%s, body=%s",
+                            response.status_code,
+                            response.text[:300],
+                        )
                     logger.warning(
                         "Upload failed with status code %s, body=%s",
                         response.status_code,
